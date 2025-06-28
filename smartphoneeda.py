@@ -1,11 +1,4 @@
-# Smartphone EDA & Interactive Dashboard
-# -------------------------------------------------
-# A Streamlit application for exploring smartphone
-# specification data. The app loads the CSV, performs
-# cleaning & feature engineering, and offers interactive
-# visualizations.
-# -------------------------------------------------
-
+#if yo code chitta bujhena bhaney tala comment gareko code run gara hai upto 363lines
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -20,39 +13,29 @@ st.set_page_config(page_title="Smartphone EDA Dashboard", layout="wide", initial
 # ------------------------------------------------------------------
 
 def load_data(uploaded_file: BytesIO | str):
-    """Load the CSV from an UploadedFile or a filepath string, then clean it."""
     if isinstance(uploaded_file, str):
         df = pd.read_csv(uploaded_file)
     else:
         df = pd.read_csv(uploaded_file)
 
-    st.session_state["raw"] = df.copy()  # keep raw for downloads
-
-    # --------------------------------------------------------------
-    # Basic cleaning
-    # --------------------------------------------------------------
+    st.session_state["raw"] = df.copy()
     df.columns = df.columns.str.strip()
 
-    # Dates
     if "Release Date" in df.columns:
         df["Release Date"] = pd.to_datetime(df["Release Date"], errors="coerce")
         df["Release Year"] = df["Release Year"].fillna(df["Release Date"].dt.year)
 
-    # Detect yes/no columns -> boolean
     for col in df.select_dtypes(include="object").columns:
         uniques = df[col].dropna().str.lower().str.strip().unique()
         if set(uniques).issubset({"yes", "no", "y", "n"}):
             df[col] = df[col].str.lower().str.strip().map({"yes": True, "y": True, "no": False, "n": False})
 
-    # Numeric coercion & median imputation
     num_cols = df.select_dtypes(include=["float64", "int64", "object"]).columns
     for col in num_cols:
-        # Attempt numeric conversion where possible
         df[col] = pd.to_numeric(df[col], errors="ignore")
     num_cols = df.select_dtypes(include=["float64", "int64"]).columns
     df[num_cols] = df[num_cols].fillna(df[num_cols].median())
 
-    # Additional feature engineering
     if "High Refresh Rate (Hz)" in df.columns:
         df["High Refresh"] = df["High Refresh Rate (Hz)"].gt(60)
 
@@ -77,13 +60,11 @@ selected_brands = st.sidebar.multiselect("Brand", brands, default=list(brands)[:
 min_year, max_year = int(df["Release Year"].min()), int(df["Release Year"].max())
 year_range = st.sidebar.slider("Release Year", min_year, max_year, (min_year, max_year))
 
-# Optional boolean filters if columns exist
 bool_filters = {}
 for boolean_col in ["has_5G", "Wireless Charging", "Fingerprint", "High Refresh"]:
     if boolean_col in df.columns:
         bool_filters[boolean_col] = st.sidebar.checkbox(boolean_col.replace("_", " "), value=False)
 
-# Apply filters ----------------------------------------------------
 mask = (
     df["Brand"].isin(selected_brands) &
     df["Release Year"].between(year_range[0], year_range[1])
@@ -103,9 +84,8 @@ st.sidebar.markdown(f"**Filtered Rows:** {len(filtered_df):,} / {len(df):,}")
 st.title("📱 Smartphone Specs EDA Dashboard")
 st.markdown("Interactively explore trends and distributions in smartphone specifications from 2004‑2025.")
 
-# Tabs for organization
-Overview, Distributions, Trends, Correlation, Data = st.tabs([
-    "Overview", "Distributions", "Trends", "Correlation", "Data"])
+Overview, Distributions, Trends, Correlation, Innovation, Data = st.tabs([
+    "Overview", "Distributions", "Trends", "Correlation", "Innovation", "Data"])
 
 with Overview:
     st.subheader("Key Metrics")
@@ -153,11 +133,48 @@ with Correlation:
     heat = px.imshow(num_df, text_auto=".2f")
     st.plotly_chart(heat, use_container_width=True)
 
+with Innovation:
+    st.subheader("Brand Adaptation to New Features")
+
+    trend_features = ["has_5G", "Wireless Charging", "High Refresh", "Fingerprint"]
+    recent_df = df[df["Release Year"] >= 2015]
+
+    brand_feature_adoption = (
+        recent_df.groupby("Brand")[trend_features]
+        .mean()
+        .sort_values(by="has_5G", ascending=False)
+        .round(2)
+    )
+
+    st.dataframe(brand_feature_adoption.style.format("{:.2%}"), use_container_width=True)
+
+    st.markdown("**Top Innovative Brands (2015 and later)**")
+    for feature in trend_features:
+        top = brand_feature_adoption[feature].nlargest(1)
+        st.write(f"📌 **{top.index[0]}** leads in adopting **{feature.replace('_', ' ')}** with **{(top.iloc[0]*100):.1f}%** of models.")
+
+    st.subheader("📈 Earliest Feature Adoption")
+    earliest_adopters = {}
+    for feature in trend_features:
+        adopters = df[df[feature] == 1].sort_values("Release Year")
+        if not adopters.empty:
+            earliest = adopters.iloc[0]
+            earliest_adopters[feature] = (earliest["Brand"], int(earliest["Release Year"]))
+
+    for feat, (brand, year) in earliest_adopters.items():
+        st.markdown(f"- **{brand}** first adopted **{feat.replace('_', ' ')}** in **{year}**")
+
+    st.subheader("🏆 Innovation Score (weighted average)")
+    weights = {"has_5G": 3, "Wireless Charging": 2, "High Refresh": 2, "Fingerprint": 1}
+    score_df = brand_feature_adoption.copy()
+    score_df["Innovation Score"] = sum(score_df[col] * weight for col, weight in weights.items())
+    score_df = score_df.sort_values("Innovation Score", ascending=False)
+    st.dataframe(score_df[["Innovation Score"] + trend_features].style.format("{:.2%}"), use_container_width=True)
+
 with Data:
     st.subheader("Raw / Cleaned Dataset")
     st.dataframe(filtered_df, use_container_width=True, height=600)
 
-    # Download buttons
     csv = filtered_df.to_csv(index=False).encode()
     st.download_button("Download filtered CSV", csv, "filtered_smartphone_data.csv", "text/csv")
 
@@ -165,13 +182,189 @@ with Data:
         raw_csv = st.session_state["raw"].to_csv(index=False).encode()
         st.download_button("Download original CSV", raw_csv, "raw_smartphone_data.csv", "text/csv", type="primary")
 
-# ------------------------------------------------------------------
-# 3. FOOTER
-# ------------------------------------------------------------------
-
 st.markdown("""---
 **Usage**: Save this script as `smartphone_eda_app.py` and run `streamlit run smartphone_eda_app.py` in your terminal. Upload a CSV with similar structure or use the default dataset provided. © 2025
 """)
+
+
+# # Smartphone EDA & Interactive Dashboard
+# # -------------------------------------------------
+# # A Streamlit application for exploring smartphone
+# # specification data. The app loads the CSV, performs
+# # cleaning & feature engineering, and offers interactive
+# # visualizations.
+# # -------------------------------------------------
+
+# import streamlit as st
+# import pandas as pd
+# import numpy as np
+# import plotly.express as px
+# import plotly.graph_objects as go
+# from io import BytesIO
+
+# st.set_page_config(page_title="Smartphone EDA Dashboard", layout="wide", initial_sidebar_state="expanded")
+
+# # ------------------------------------------------------------------
+# # 1. LOAD & CLEAN DATA
+# # ------------------------------------------------------------------
+
+# def load_data(uploaded_file: BytesIO | str):
+#     """Load the CSV from an UploadedFile or a filepath string, then clean it."""
+#     if isinstance(uploaded_file, str):
+#         df = pd.read_csv(uploaded_file)
+#     else:
+#         df = pd.read_csv(uploaded_file)
+
+#     st.session_state["raw"] = df.copy()  # keep raw for downloads
+
+#     # --------------------------------------------------------------
+#     # Basic cleaning
+#     # --------------------------------------------------------------
+#     df.columns = df.columns.str.strip()
+
+#     # Dates
+#     if "Release Date" in df.columns:
+#         df["Release Date"] = pd.to_datetime(df["Release Date"], errors="coerce")
+#         df["Release Year"] = df["Release Year"].fillna(df["Release Date"].dt.year)
+
+#     # Detect yes/no columns -> boolean
+#     for col in df.select_dtypes(include="object").columns:
+#         uniques = df[col].dropna().str.lower().str.strip().unique()
+#         if set(uniques).issubset({"yes", "no", "y", "n"}):
+#             df[col] = df[col].str.lower().str.strip().map({"yes": True, "y": True, "no": False, "n": False})
+
+#     # Numeric coercion & median imputation
+#     num_cols = df.select_dtypes(include=["float64", "int64", "object"]).columns
+#     for col in num_cols:
+#         # Attempt numeric conversion where possible
+#         df[col] = pd.to_numeric(df[col], errors="ignore")
+#     num_cols = df.select_dtypes(include=["float64", "int64"]).columns
+#     df[num_cols] = df[num_cols].fillna(df[num_cols].median())
+
+#     # Additional feature engineering
+#     if "High Refresh Rate (Hz)" in df.columns:
+#         df["High Refresh"] = df["High Refresh Rate (Hz)"].gt(60)
+
+#     if "5G" in df.columns:
+#         df["has_5G"] = df["5G"].astype(bool)
+
+#     return df
+
+# # Sidebar: Data source --------------------------------------------
+# st.sidebar.header("📁 Data Source")
+# uploaded = st.sidebar.file_uploader("Upload smartphone CSV", type=["csv"])
+# DEFAULT_PATH = "/Users/anushashrestha/Documents/7thsem/DM/project/smartphonedata.csv"
+
+# df = load_data(uploaded if uploaded else DEFAULT_PATH)
+
+# # Sidebar: Filters -------------------------------------------------
+# st.sidebar.header("🔍 Filters")
+
+# brands = df["Brand"].dropna().sort_values().unique()
+# selected_brands = st.sidebar.multiselect("Brand", brands, default=list(brands)[:10])
+
+# min_year, max_year = int(df["Release Year"].min()), int(df["Release Year"].max())
+# year_range = st.sidebar.slider("Release Year", min_year, max_year, (min_year, max_year))
+
+# # Optional boolean filters if columns exist
+# bool_filters = {}
+# for boolean_col in ["has_5G", "Wireless Charging", "Fingerprint", "High Refresh"]:
+#     if boolean_col in df.columns:
+#         bool_filters[boolean_col] = st.sidebar.checkbox(boolean_col.replace("_", " "), value=False)
+
+# # Apply filters ----------------------------------------------------
+# mask = (
+#     df["Brand"].isin(selected_brands) &
+#     df["Release Year"].between(year_range[0], year_range[1])
+# )
+# for col, flag in bool_filters.items():
+#     if flag:
+#         mask &= df[col]
+
+# filtered_df = df[mask]
+
+# st.sidebar.markdown(f"**Filtered Rows:** {len(filtered_df):,} / {len(df):,}")
+
+# # ------------------------------------------------------------------
+# # 2. MAIN LAYOUT
+# # ------------------------------------------------------------------
+
+# st.title("📱 Smartphone Specs EDA Dashboard")
+# st.markdown("Interactively explore trends and distributions in smartphone specifications from 2004‑2025.")
+
+# # Tabs for organization
+# Overview, Distributions, Trends, Correlation, Data = st.tabs([
+#     "Overview", "Distributions", "Trends", "Correlation", "Data"])
+
+# with Overview:
+#     st.subheader("Key Metrics")
+#     c1, c2, c3, c4 = st.columns(4)
+#     c1.metric("Models", f"{len(filtered_df):,}")
+#     if "Battery Capacity" in filtered_df.columns:
+#         c2.metric("Avg Battery (mAh)", f"{filtered_df['Battery Capacity'].mean():.0f}")
+#     if "RAM Memory (GB)" in filtered_df.columns:
+#         c3.metric("Avg RAM (GB)", f"{filtered_df['RAM Memory (GB)'].mean():.1f}")
+#     if "Pixels Per Inch" in filtered_df.columns:
+#         c4.metric("Avg PPI", f"{filtered_df['Pixels Per Inch'].mean():.0f}")
+
+#     st.divider()
+#     st.subheader("Releases by Year")
+#     releases = filtered_df.groupby("Release Year").size().reset_index(name="count")
+#     fig = px.bar(releases, x="Release Year", y="count", title="Number of Smartphone Models Released Per Year")
+#     st.plotly_chart(fig, use_container_width=True)
+
+# with Distributions:
+#     st.subheader("Numeric Feature Distribution")
+#     numeric_cols = filtered_df.select_dtypes(include=["float64", "int64"]).columns.tolist()
+#     if numeric_cols:
+#         dist_col = st.selectbox("Select numeric column", numeric_cols, index=numeric_cols.index("Battery Capacity") if "Battery Capacity" in numeric_cols else 0)
+#         hist = px.histogram(filtered_df, x=dist_col, nbins=40, title=f"Distribution of {dist_col}")
+#         st.plotly_chart(hist, use_container_width=True)
+
+# with Trends:
+#     st.subheader("Trend Over Time")
+#     trend_options = {
+#         "Average Battery Capacity": "Battery Capacity",
+#         "Average RAM (GB)": "RAM Memory (GB)",
+#         "Average CPU Frequency (GHz)": "CPU Frequency (GHz)",
+#     }
+#     available_trends = {k: v for k, v in trend_options.items() if v in filtered_df.columns}
+#     trend_label = st.selectbox("Metric", list(available_trends.keys()))
+#     trend_col = available_trends[trend_label]
+
+#     trend_df = filtered_df.groupby("Release Year")[trend_col].mean().reset_index()
+#     line = px.line(trend_df, x="Release Year", y=trend_col, title=f"{trend_label} by Year")
+#     st.plotly_chart(line, use_container_width=True)
+
+# with Correlation:
+#     st.subheader("Correlation Heatmap (Numeric Features)")
+#     num_df = filtered_df.select_dtypes(include=["float64", "int64"]).corr()
+#     heat = px.imshow(num_df, text_auto=".2f")
+#     st.plotly_chart(heat, use_container_width=True)
+
+# with Data:
+#     st.subheader("Raw / Cleaned Dataset")
+#     st.dataframe(filtered_df, use_container_width=True, height=600)
+
+#     # Download buttons
+#     csv = filtered_df.to_csv(index=False).encode()
+#     st.download_button("Download filtered CSV", csv, "filtered_smartphone_data.csv", "text/csv")
+
+#     if "raw" in st.session_state:
+#         raw_csv = st.session_state["raw"].to_csv(index=False).encode()
+#         st.download_button("Download original CSV", raw_csv, "raw_smartphone_data.csv", "text/csv", type="primary")
+
+# # ------------------------------------------------------------------
+# # 3. FOOTER
+# # ------------------------------------------------------------------
+
+# st.markdown("""---
+# **Usage**: Save this script as `smartphone_eda_app.py` and run `streamlit run smartphone_eda_app.py` in your terminal. Upload a CSV with similar structure or use the default dataset provided. © 2025
+# """)
+
+
+
+
 
 # import streamlit as st
 # import pandas as pd
